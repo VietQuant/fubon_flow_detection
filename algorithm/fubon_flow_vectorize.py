@@ -1,92 +1,115 @@
 import datetime
 import time
-from typing import Dict
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
-
-###################################### TEST PARAMS FOR DC ######################################
-
-def get_portfolio_distribution() -> Dict[float, list]:
-    return {
-		# 0.15: [0.14, 0.2],# extra
-		0.25: [0.26, 0.3], # extra
-		# 0.35: [0.3, 0.4], # extra
-		0.5: [0.4, 0.74], # modify 0.41 -> 0.4
-		1: [0.74, 1.25],  # modify 0.862 -> 0.74, 1.215 -> 1.25
-		1.5: [1.258, 1.7], # modify 1.675 -> 1.7
-		2: [1.7, 2.6], # modify 2.25 -> 2.6
-		3: [2.6, 3.6], # modify 3.55 -> 3.6
-		4: [3.6, 4.4],
-		5: [4.5, 5.55],
-		6: [5.6, 6.55],
-		7: [6.6, 7.55],
-		8: [7.6, 8.55],
-		9: [8.6, 9.55],
-		10: [9.6, 10.8],
-		15: [10.9, 20], # extra
-		# 25: [20.1, 30], # extra
-    }
-
-ISO_DATETIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
-CUSTOM_DATE_FORMAT = "%Y%m%d"
-CUSTOM_TIME_FORMAT = "%H:%M:%S"
-SECONDS_GAP = 55
-SECONDS_EARLY = 5
-TOLERANCE = 0.175
-UNKNOWN_SEGMENT_TAG = -1
-LOT_VALUE = 2.56
-MAX_NUMLOT = 1_000_000
-NUM_LOT_BASKET = 1
-MIN_UNIQUE_STOCK_PER_SIM_BLOCK = 9
-MIN_SEGMENT_LENGTH_PER_CLUSTER = 8
-CORE_THRESHOLD = 11
-DISTRIBUTION = get_portfolio_distribution()
-NS_PER_SECOND = 1_000_000_000
-
-###################################### TEST PARAMS FOR FUBON ######################################
-# def get_portfolio_distribution() -> Dict[float, list]:
-#     return {
-#         0.25: [0.02, 0.375],
-#         0.5: [0.375, 0.625],
-#         0.75: [0.625, 0.875],
-#         1.0: [0.875, 1.125],
-#         1.25: [1.125, 1.5],
-#         1.75: [1.5, 2.0],
-#         2.25: [2.0, 2.625],
-#         3.0: [2.625, 3.5],
-#         4.0: [3.5, 4.75],
-#         5.5: [4.75, 6.375],
-#         7.25: [6.375, 8.375],
-#         9.5: [8.375, 11.125],
-#         12.75: [11.125, 14.75],
-#         16.75: [14.75, 19.5],
-#         22.25: [19.5, 25.875],
-#         29.5: [25.875, 34.375],
-#         39.25: [34.375, 45.625],
-#         52.0: [45.625, 50.0]
-#     }
-
-
-# ISO_DATETIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
-# CUSTOM_DATE_FORMAT = "%Y%m%d"
-# CUSTOM_TIME_FORMAT = "%H:%M:%S"
-# SECONDS_GAP = 55
-# SECONDS_EARLY = 20
-# TOLERANCE = 0.35
-# UNKNOWN_SEGMENT_TAG = -1
-# MAX_NUMLOT = 1_000_000
-# NUM_LOT_BASKET = 1
-# MIN_UNIQUE_STOCK_PER_SIM_BLOCK = 17
-# MIN_SEGMENT_LENGTH_PER_CLUSTER = 9
-# CORE_THRESHOLD = 14
-# DISTRIBUTION = get_portfolio_distribution()
-# NS_PER_SECOND = 1_000_000_000
-
-###################################################################################################
+from pathlib import Path
 
 def mmap(*args):
     return list(map(*args))
+
+def generate_non_overlap_distribution(
+    start: float = 0.5,
+    stop: float = 100.0,
+    num: int = 40,
+    step: float = 0.5,
+    decimals: int = 3,
+    growth: float = 1.0,
+    int_threshold: float = 3.0,
+    first_center: float = None,
+) -> Dict[float, List[float]]:
+    if start <= 0 or stop <= 0 or stop <= start:
+        raise ValueError("start and stop must be positive and stop > start.")
+    if num < 2:
+        raise ValueError("num must be >= 2.")
+    if growth <= 0:
+        raise ValueError("growth must be > 0.")
+
+    t = np.linspace(0.0, 1.0, num)
+    w = t ** growth
+    log_start, log_stop = np.log(start), np.log(stop)
+    raw = np.exp(log_start + (log_stop - log_start) * w)
+    rounded = np.round(raw / step) * step
+    rounded = np.clip(rounded, start, stop)
+    lots = np.unique(rounded.astype(float))
+    lots[-1] = float(round(stop, decimals))
+
+    snapped = []
+    for v in lots:
+        if v >= int_threshold:
+            v = round(v)
+        snapped.append(float(v))
+    lots = np.array(snapped, dtype=float)
+
+    eps = 1e-9
+    filtered = []
+    last = None
+    for v in lots:
+        if last is None or v > last + eps:
+            filtered.append(v)
+            last = v
+    if filtered[-1] < stop - eps:
+        filtered.append(stop)
+
+    if first_center is not None:
+        fc = float(max(first_center, start))
+        filtered = [x for x in filtered if x >= fc - eps]
+        if not filtered or filtered[0] > fc + eps:
+            filtered.insert(0, fc)
+        else:
+            filtered[0] = fc
+
+    lots = [round(float(x), decimals) for x in filtered]
+    lots[-1] = round(stop, decimals)
+
+    clean = []
+    last = None
+    for v in lots:
+        if last is None or v > last + eps:
+            clean.append(v)
+            last = v
+    lots = clean
+
+    distribution: Dict[float, List[float]] = {}
+    for i, lot in enumerate(lots):
+        if i == 0:
+            lower = round(start, decimals)
+            upper = round((lots[i] + lots[i+1]) / 2, decimals)
+        elif i == len(lots) - 1:
+            lower = round((lots[i-1] + lots[i]) / 2, decimals)
+            upper = round(stop, decimals)
+        else:
+            lower = round((lots[i-1] + lots[i]) / 2, decimals)
+            upper = round((lots[i] + lots[i+1]) / 2, decimals)
+        distribution[lot] = [lower, upper]
+    return distribution
+
+#### For FUBON
+ISO_DATETIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
+CUSTOM_DATE_FORMAT = "%Y%m%d"
+CUSTOM_TIME_FORMAT = "%H:%M:%S"
+SECONDS_GAP = 45
+SECONDS_EARLY = 16
+TOLERANCE = 0.3633
+UNKNOWN_SEGMENT_TAG = -1
+MAX_NUMLOT = 1_000_000
+NUM_LOT_BASKET = 1
+MIN_UNIQUE_STOCK_PER_SIM_BLOCK = 15
+MIN_SEGMENT_LENGTH_PER_CLUSTER = 7
+CORE_THRESHOLD = 8
+DISTRIBUTION = generate_non_overlap_distribution(
+    start=0.02,
+    stop=100,
+    num=22,
+    step=0.2,
+    decimals=3,
+    growth=1.1167,
+    int_threshold=7,
+    first_center=0.25
+)
+
+NS_PER_SECOND = 1_000_000_000
 
 RUN_DATES = [
     "2024-09-04",
@@ -150,6 +173,7 @@ def get_snapshot_data(
     if left >= right:
         return df.iloc[0:0]
     return df.iloc[left:right]
+
 
 def wrangle(df: pd.DataFrame) -> pd.DataFrame:
     df = df.rename(
@@ -261,6 +285,7 @@ def cluster_similarity_block(
     distribution: Dict[float, list] = DISTRIBUTION,
     min_segment_length_per_cluster: int = MIN_SEGMENT_LENGTH_PER_CLUSTER,
     fill_value: int = UNKNOWN_SEGMENT_TAG,
+    seconds_early: int = SECONDS_EARLY,
 ) -> pd.DataFrame:
     if similarity_df.empty:
         return similarity_df
@@ -278,7 +303,7 @@ def cluster_similarity_block(
                 offset += 1_000_000
                 continue
             temp_df = df_side.loc[mask].copy()
-            gap_flags = temp_df["ts"].diff().ge(pd.Timedelta(seconds=10))
+            gap_flags = temp_df["ts"].diff().ge(pd.Timedelta(seconds=seconds_early))
             temp_df["segment_ids"] = gap_flags.cumsum() + offset
             offset += 1_000_000
             temp_df["lot_bucket"] = lot
@@ -359,11 +384,16 @@ def final_process(
 def main() -> None:
     time_start = time.time()
 
-    weight = pd.read_csv(
-        "/data/fund_weight_long.csv"
-    ).rename(columns={"volume": "quantity"})
+    # Project-relative paths
+    ROOT = Path(__file__).resolve().parents[1]
+    DATA_DIR = ROOT / "data"
+    RESULTS_DIR = ROOT / "results"
+
+    weight_path = DATA_DIR / "fubon_fund_weight_long.csv"
+    weight = pd.read_csv(weight_path.as_posix()).rename(columns={"volume": "quantity"})
 
     for run_date in RUN_DATES:
+        # Keep these external data paths unchanged as requested
         orderbook = pd.read_csv(
             f"/data/tick_feature/sample_data/udp_orderbook/{run_date}.csv"
         ).rename(columns={"symbol": "stock"})
@@ -433,6 +463,7 @@ def main() -> None:
                         similarity_df=similarity_df,
                         distribution=DISTRIBUTION,
                         min_segment_length_per_cluster=MIN_SEGMENT_LENGTH_PER_CLUSTER,
+                        seconds_early=SECONDS_EARLY
                     )
                     clustered_df = filter_clusters_by_core(
                         clustered_df,
@@ -456,8 +487,9 @@ def main() -> None:
         df_res["arbit_value"] = np.where(df_res["side"] == 1, df_res["matched_value"], 0.0)
         df_res["unwind_value"] = np.where(df_res["side"] == -1, df_res["matched_value"], 0.0)
 
-        df_res.to_csv(f"/results{run_date}.csv", index=False)
-        # df_res.to_csv(f"/results/E1VFVN30/{run_date}.csv", index=False)
+        df_res.to_csv((RESULTS_DIR / f"{run_date}.csv").as_posix(), index=False)
+        # df_res.to_csv(f"/home/duc/Desktop/feature_engineer/data/E1VFVN30/{run_date}.csv", index=False)
+
 
     print(f"Run time: {time.time() - time_start}")
 

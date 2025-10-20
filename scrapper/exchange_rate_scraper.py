@@ -4,6 +4,7 @@ Add exchange rates using the EXACT same logic as fubon_scraper_ultimate_fast.py
 """
 
 import os
+from pathlib import Path
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
@@ -14,9 +15,15 @@ import time
 import warnings
 warnings.filterwarnings('ignore')
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 class ExchangeRateAdder:
-    def __init__(self, data_dir="/data/fubon_weight_data/raw"):
-        self.data_dir = data_dir
+    def __init__(self, data_dir=None):
+        if data_dir is None:
+            data_dir = ROOT / "data" / "fubon_weight_data" / "raw"
+        self.data_dir = Path(data_dir)
+        os.makedirs(self.data_dir, exist_ok=True)
         self.etf_code = "00885"
         
         # Disable SSL warnings

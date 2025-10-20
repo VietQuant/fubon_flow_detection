@@ -6,6 +6,7 @@ Usage giống hệt bản UltimateFastScraper gốc của mày
 """
 
 import os
+from pathlib import Path
 import time
 import requests
 import pandas as pd
@@ -23,10 +24,16 @@ warnings.filterwarnings('ignore')
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 class UltimateFastPCFScraper:
-    def __init__(self, etf_code="00885", output_dir="/data/fubon_weight_data/portfolio_composition"):
+    def __init__(self, etf_code="00885", output_dir=None):
         self.etf_code = etf_code
-        self.output_dir = output_dir
+        # Use project-relative default if not provided
+        if output_dir is None:
+            output_dir = ROOT / "data" / "fubon_weight_data" / "portfolio_composition"
+        self.output_dir = Path(output_dir)
         os.makedirs(self.output_dir, exist_ok=True)
 
         self.file_lock = threading.Lock()

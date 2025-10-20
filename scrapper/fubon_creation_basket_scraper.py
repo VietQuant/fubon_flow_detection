@@ -11,6 +11,7 @@ Optimizations:
 """
 
 import os
+from pathlib import Path
 import time
 import requests
 import pandas as pd
@@ -29,10 +30,15 @@ warnings.filterwarnings('ignore')
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 class UltimateFastScraper:
-    def __init__(self, etf_code="00885", output_dir="/data/fubon_weight_data/creation_basket"):
+    def __init__(self, etf_code="00885", output_dir=None):
         self.etf_code = etf_code
-        self.output_dir = output_dir
+        if output_dir is None:
+            output_dir = ROOT / "data" / "fubon_weight_data" / "creation_basket"
+        self.output_dir = Path(output_dir)
         os.makedirs(self.output_dir, exist_ok=True)
         
         self.file_lock = threading.Lock()
